@@ -11,11 +11,9 @@ from sklearn.neighbors import NearestNeighbors
 import yaml
 import os
 import time
-import sys
 
-sys.stdout.flush()
 class RBM():
-    def __init__(self, seed,visible_dim, hidden_dim, number_of_epochs, picture_shape, batch_size, training_algorithm='cd',
+    def __init__(self, visible_dim, hidden_dim, number_of_epochs, picture_shape, batch_size, training_algorithm='cd',
                  initializer='glorot', k=1, n_test_samples=500, l_1=0):
     
         self._n_epoch = number_of_epochs
@@ -36,7 +34,6 @@ class RBM():
             "%d%m") + '/' + datetime.datetime.now().strftime("%H%M%S") + '/train'
         self._file_writer = tf.summary.create_file_writer(self._log_dir)
         self._file_writer.set_as_default()
-        self.seed=seed
 
     # @tf.function
     def model(self):
@@ -60,7 +57,8 @@ class RBM():
     def update_model(self):
         for key, value in self.model_dict.items():
             setattr(self, key, value)
-
+            
+   
     def save_model(self):
         """
         Save the current RBM model as .h5 file dictionary with  keys: {'weights', 'visible_biases', 'hidden_biases' }
@@ -69,7 +67,7 @@ class RBM():
                            'hidden_biases': self.hidden_biases.numpy()}
         if not os.path.exists(self.d_m_folder):
             os.makedirs(self.d_m_folder)
-        return dd.io.save(self.d_m_folder + '/' + self._current_time +'_epoch'+str(self.epoch)+str(self.seed)+'model.h5', model_dict_save)
+        return dd.io.save(self.d_m_folder + '/' + self._current_time +'_epoch'+str(self.epoch)+'model.h5', model_dict_save)
 
     def save_param(self, optimizer, data=None):
         to_save = {}
@@ -83,6 +81,8 @@ class RBM():
         for key, value in variables.items():
             if key not in not_save:
                 to_save[key] = value
+        if not os.path.exists(self.d_m_folder):
+            os.makedirs(self.d_m_folder)
         with open('results/models/' + self._current_time + 'parameters.yml', 'w') as yaml_file:
             yaml.dump(to_save, stream=yaml_file, default_flow_style=False)
         # display parameters in tensorboard
@@ -197,37 +197,6 @@ class RBM():
         else:
             return visible_states_1, visible_probabilities_1, inpt
 
-    def parallel_sample_cond(self, cond, inpt=[], n_step_MC=1, p_0=0.5, p_1=0.5, n_chains=5000, save_evolution=False):
-        l = cond.shape[1]
-
-        if len(inpt) == 0:
-            print("first ", flush=True)
-            inpt = np.random.choice([0, 1], size=(n_chains, self._v_dim), p=[p_0, p_1]).astype(np.float64)
-        else:
-            # check shape
-            if len(inpt.shape) != 2:
-                inpt = inpt.reshape(1, inpt.shape[0])
-        if save_evolution:
-            evolution = np.empty((n_step_MC, self._v_dim))
-            evolution[0] = inpt
-        hidden_probabilities_0 = tf.sigmoid(
-            tf.tensordot(inpt, self.weights, axes=[[1], [1]]) + self.hidden_biases)  # dimension W + 1 row for biases
-        hidden_states_0 = self.calculate_state(hidden_probabilities_0)
-        for i in range(n_step_MC):  # gibbs update
-            visible_probabilities_1 = tf.sigmoid(tf.tensordot(hidden_states_0, self.weights, axes=[[1], [
-                0]]) + self.visible_biases)  # dimension W + 1 row for biases
-            visible_states_1 = self.calculate_state(visible_probabilities_1)
-            visible_states_1[0, -l:] = cond
-            hidden_probabilities_1 = tf.sigmoid(tf.tensordot(visible_states_1, self.weights, axes=[[1], [
-                1]]) + self.hidden_biases)  # dimension W + 1 row for biases
-            hidden_states_1 = self.calculate_state(hidden_probabilities_1)
-            hidden_states_0 = hidden_states_1
-            if save_evolution:
-                evolution[i] = visible_states_1
-        if save_evolution:
-            return visible_states_1, visible_probabilities_1, inpt, evolution
-        else:
-            return visible_states_1, visible_probabilities_1, inpt
 
     def parallel_sample_beta(self, inpt=[], n_step_MC=1, p_0=0.5, p_1=0.5, n_chains=1, beta = 1):
         if len(inpt) == 0:
@@ -391,7 +360,7 @@ class RBM():
             tf.summary.scalar('min', tf.reduce_min(var), step)
             tf.summary.histogram('histogram', var, step=step)
 
-    def train(self, data, qqraw_data, optimizer, metric_monitor, xmas, xmin, weeks=13):
+    def train(self, data, qqraw_data, optimizer, metric_monitor, xmas, xmin):
         """
         This function shuffle the dataset and create #data_train/batch_size mini batches and perform contrastive divergence on each vector of the batch.
         The upgrade of the parameters is performed only at the end of each batch by taking the average of the gradients on the batch.
@@ -403,7 +372,7 @@ class RBM():
 
         :return: self
         """
-        #print('Start training...', flush=True)
+        print('Start training...')
 
         # config = np.array([i for i in product(range(2), repeat=self._h_dim)]).astype(np.int32)
         # lista = np.split(config, 256)
@@ -413,9 +382,9 @@ class RBM():
             start_time = time.time()
             self.epoch = epoch
             # sys.stdout.write('\r')
-            #print('Model',self._current_time,'Epoch:', epoch, '/', self._n_epoch)
+            print('Model',self._current_time,'Epoch:', epoch, '/', self._n_epoch)
             #np.random.shuffle(data['x_train'])
-            for i in (range(0, data['x_train'].shape[0], self._batch_size)):
+            for i in tqdm(range(0, data['x_train'].shape[0], self._batch_size)):
 
                 if self.training_algorithm == 'cd':
                     x_train_mini = data['x_train'][i:i + self._batch_size]
@@ -435,13 +404,12 @@ class RBM():
                                   'hidden_biases': batch_dhb}
                 optimizer.fit()
             # Save model every epoch
-            #self.save_model()
+            self.save_model()
 
             #test every epoch
-            if epoch%20000==0:
-                #print(epoch, flush=True)
+            if epoch%1==0:
                 self.save_model()
-                #metric_monitor.fit(weeks, data['x_train'], qqraw_data, xmas, xmin)
+                metric_monitor.fit(data['x_train'], qqraw_data, xmas, xmin)
                 #end_time = time.time()
                 #print('time:', end_time - start_time)
 

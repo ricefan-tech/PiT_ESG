@@ -30,11 +30,10 @@ import tensorflow as tf
 eps_min=0
 eps_max=0
 
-weeks=13
 simlen=5
 
 
-def data():
+def data_fun():
     spx=pd.read_excel("SPX.xls", sheet_name="SPX", usecols=["Date","Adj Close"],header=0)
     spx.rename(columns={"Adj Close": "SP500"}, inplace=True)
     vix=pd.read_excel("VIX.xls", sheet_name="VIX", usecols=["Date","Adj Close"],header=0)
@@ -168,14 +167,14 @@ def dataplot(data):
 #%%
     
 if __name__ == '__main__':
-    raw_data = data()
+    raw_data = data_fun()
     rawdata=backfilling(raw_data, logs=False)
     rawdata.SP500 = np.log((rawdata.SP500 / rawdata.SP500.shift(1)).astype(np.float64))
     #contains first nan
     spx=buildataset(rawdata.SP500)
     vix=buildataset(rawdata.VIX)
 
-    final_rawdata=np.concatenate([spx[1:,:], vix[1:,:], vix[:-1,-1].reshape(-1,1)], axis=1)
+    final_rawdata=np.concatenate([spx[1:,:], vix[:-1,-1].reshape(-1,1)], axis=1)
     training_data, x_max, x_min=int_to_bin(final_rawdata)
 
 
@@ -186,59 +185,55 @@ if __name__ == '__main__':
     x_test = training_data.iloc[trainsize:,:].to_numpy().astype(np.float64)
     data={"x_train":x_train,"y_train":[], "x_test":x_test, "y_test":[]}
     
-   ###############################################################################################
-    vis_dim=(16*(raw_data.shape[1]*simlen+1))
-    hids=[50, 100, 150]
-    l=[0.0001,0.001,0.01]
-    mc=[500]
+    ###############################################################################################
+    #vis_dim=(16*(raw_data.shape[1]*simlen+1))
+    vis_dim = (16 *  (simlen + 1))
+    hids=32
+    l=0.0001
+    mc=800
     starts = [4695]
     conditioning_week = int(np.floor((starts[0] - 1) / 5))
-    sampsize = weeks
-    samptimes = 200
-    samps = np.zeros((simlen * weeks, samptimes))
-    sampint = np.zeros((sampsize, 16 * simlen))
+    #weeks=[4,26,52]
+    weeks=[2]
+    num_epochs=1
+    pic_shape=(1,vis_dim)
+    bat_size=50
 
-    for i in range(len(hids)):
-        hid_dim = hids[i]
-        for j in range(len(l)):
-            l_rate = l[j]
-            for k in range(len(mc)):
+    n_step_MC=mc
+    steps=5
+    n_chains=1
+    machine=RBM(0,vis_dim,hids,num_epochs,pic_shape, bat_size, k=steps)
+    #print(hid_dim, l_rate, n_step_MC, machine._current_time, flush=True)
+    optimus=Optimizer(machine,l,opt='adam')
+    machine.save_param(optimus)
+    monitor=Metrics_monitor(machine, metrics = ['sq_error','DKL'],steps=n_step_MC,n_chains=n_chains)
+    #rawdata.sp500 contains first nan
+    machine.train(data,rawdata.SP500.values[4694:4694+65] ,optimus, monitor ,x_max,x_min)
+    #machine.from_saved_model("results/models/1302/1302-165413_epoch30000model.h5")	
+    samples=1
+    for k in range(len(weeks)):
+		
+        sampsize = weeks[k]
+        samptimes = samples
+        samps = np.zeros((simlen * weeks[k], samptimes))
+        sampint = np.zeros((sampsize, 16 * simlen))
+        # inpt = np.random.choice([0, 1], size=(n_chains, self._v_dim), p=[p_0, p_1]).astype(np.float64)
+        for i in range(samptimes):
+            print("samptime ", i, flush=True)
+            cond = data['x_train'][int(np.floor((4694)/5)), -16:]
+            for j in range(sampsize):
+                rnd = np.random.choice([0, 1], size=(1, 16*simlen), p=[0.5, 0.5]).astype(np.float64)
+                inpt = np.concatenate([rnd, cond.reshape(1, 16)], axis=1)
+                a, _, _ = machine.parallel_sample_cond(cond=cond.reshape(1, -1), inpt=inpt, n_step_MC=n_step_MC, n_chains=1)
+                # print(a)
+                sampint[j, :] = a[:, :16*simlen]
 
-                num_epochs=50000
-                pic_shape=(1,vis_dim)
-                bat_size=50
+                cond =data['x_train'][int(np.floor((4694)/5))+1+j, -16:]
+            s = pd.DataFrame(data=sampint)
+            # print(s)
+            # bin_to_int assumes each passed column to be one variable!
+            samps[:, i] = bin_to_int(s).values.reshape(-1, )
 
-                n_step_MC=mc[k]
-                steps=5
-                n_chains=1
-
-                machine=RBM(vis_dim,hid_dim,num_epochs,pic_shape,bat_size, k=steps)
-                print(hid_dim, l_rate, n_step_MC, machine._current_time, flush=True)
-                optimus=Optimizer(machine,l_rate,opt='adam')
-                machine.save_param(optimus)
-                monitor=Metrics_monitor(machine, metrics = ['sq_error','DKL'],steps=n_step_MC,n_chains=n_chains)
-                #rawdata.sp500 contains first nan
-                machine.train(data,rawdata.SP500.values[1:] ,optimus, monitor ,x_max,x_min)
-
-
-
-                # inpt = np.random.choice([0, 1], size=(n_chains, self._v_dim), p=[p_0, p_1]).astype(np.float64)
-                for i in range(samptimes):
-                    print("samptime ", i, flush=True)
-                    cond = data['x_train'][0, -16:]
-                    for j in range(sampsize):
-                        rnd = np.random.choice([0, 1], size=(1, 16*2*simlen), p=[0.5, 0.5]).astype(np.float64)
-                        inpt = np.concatenate([rnd, cond.reshape(1, 16)], axis=1)
-                        a, _, _ = machine.parallel_sample_cond(cond=cond.reshape(1, -1), inpt=inpt, n_step_MC=n_step_MC, n_chains=1)
-                        # print(a)
-                        sampint[j, :] = a[:, :16*simlen]
-
-                        cond = a[:, -32:-16]
-                    s = pd.DataFrame(data=sampint)
-                    # print(s)
-                    # bin_to_int assumes each passed column to be one variable!
-                    samps[:, i] = bin_to_int(s).values.reshape(-1, )
-
-                sampsdf = pd.DataFrame(data=samps)
-                sampsdf.to_pickle("RBM" + str(hid_dim)+'_' + str(l_rate)+'_'+str(n_step_MC)+".pkl")
-                #samps_np = np.asarray(samps).reshape(-1, samptimes)
+        sampsdf = pd.DataFrame(data=samps)
+        sampsdf.to_pickle("RBM" + str(sampsize)+".pkl")
+        #samps_np = np.asarray(samps).reshape(-1, samptimes)

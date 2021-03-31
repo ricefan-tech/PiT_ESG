@@ -6256,10 +6256,10 @@ z
        <use x="75" xlink:href="#Times-Roman-49"/>
        <use x="125" xlink:href="#Times-Roman-48"/>
       </g>
-     </g>
+     </g>s
     </g>
     <g id="text_15">
-     <!-- SPX Log Returns -->
+     <!-- SPX Log-Returns -->
      <g transform="translate(15 178.560469)rotate(-90)scale(0.12 -0.12)">
       <defs>
        <path d="M 6.453125 20.125 

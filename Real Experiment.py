@@ -282,6 +282,27 @@ def strategy_ret(final, simtype="", save=True):
         plt.show()
     return retpnl
 
+def max_drawdown(simpf):
+    #assume simpf to be simlength x simpfs
+    drawdowns=[]
+    for i in range(simpf.shape[-1]):
+        X=list(simpf[:,i])
+        if X[0]!=0:
+            mdd = 0
+            peak = X[0]
+            for x in X:
+                if x==0:
+                    break
+                if x > peak: 
+                    peak = x
+                dd = (peak - x) / peak
+                if dd > mdd:
+                    mdd = dd
+            drawdowns.append(mdd)
+        else:
+            pass
+    return drawdowns
+
 def sim_acf(starts, real, sim_ret, simdays=weeks*5, simtype=""):
     z=sim_ret.shape[-1]
     for i in range(z):
@@ -368,7 +389,7 @@ if __name__ == '__main__':
     
     w= [4, 26, 52]
     
-    for i in range(3):
+    for i in range(len(w)):
         weeks=w[i]
         dfil=backfilling(d, logs=False)
         bs=HS(dfil, weeks, path)
@@ -599,7 +620,8 @@ if __name__ == '__main__':
         sim_ret_fhs[:,i:(i+1)]=np.multiply(tmp, np.asarray(dfil.iloc[daily_starts[i]:daily_starts[i]+(weeks)*simlength,0:1]))
     savedf=pd.DataFrame(data=sim_ret_fhs)
     savedf.to_pickle(perfpath+str(weeks)+"_BSpfret_long.pkl")
-    #sim_ret_fhs=np.asarray(from_pickle(perfpath+"BSpfret.pkl"))
+    sim_ret_fhs=np.asarray(from_pickle(perfpath+str(weeks)+"_BSpfret_long.pkl"))
+    fhs_mdd=max_drawdown(sim_ret_fhs)
     pnl_fhs=strategy_ret(sim_ret_fhs, simtype="BStest_long")
     
     
@@ -646,7 +668,8 @@ if __name__ == '__main__':
         
     savedf_gar=pd.DataFrame(data=sim_ret_gar)
     savedf_gar.to_pickle(perfpath+str(weeks)+"_GARpfret_long.pkl")
-    #sim_ret_gar=np.asarray(from_pickle(perfpath+"GARpfret.pkl"))
+    sim_ret_gar=np.asarray(from_pickle(perfpath+str(weeks)+"_GARpfret_long.pkl"))
+    gar_mdd=max_drawdown(sim_ret_gar)
     pnl_gar=strategy_ret(sim_ret_gar, simtype="GAR_long")
     
     
@@ -686,15 +709,19 @@ if __name__ == '__main__':
     # for i in range(200):
     #     sim_ret_cvae[:,i:(i+1)]=np.multiply(tmp[:,i:(i+1)], np.asarray(dfil2.iloc[daily_starts[i]:daily_starts[i]+weeks*simlength,0:1]))
     savedf_gar=pd.DataFrame(data=sim_ret_cvae)
-    savedf_gar.to_pickle(perfpath+str(weeks)+"_CVAEpfret.pkl")1
-    #sim_ret_cvae=np.asarray(from_pickle(perfpath+"CVAEpfret.pkl"))
+    savedf_gar.to_pickle(perfpath+str(weeks)+"_CVAEpfret.pkl")
+    sim_ret_cvae=np.asarray(from_pickle(perfpath+str(weeks)+"_CVAEpfret.pkl"))
+    cvae_mdd=max_drawdown(sim_ret_cvae)
     pnl_cvae=strategy_ret(sim_ret_cvae, simtype="CVAEPF")
     
     #%% PERFORMANCE BUY AND HOLD
     pnl=[]
+    sim_ret_bh=np.zeros((weeks*simlength, runs))
     for i in range(runs):
+        sim_ret_bh[:,i]=dfil2.iloc[daily_starts[i]:daily_starts[i]+weeks*simlength,0].values
         cumret=(dfil2.iloc[daily_starts[i]+weeks*simlength,0]-dfil2.iloc[daily_starts[i],0]-1)/dfil2.iloc[daily_starts[i],0]-1
         pnl=pnl+[cumret]    
+    bh_mdd=max_drawdown(sim_ret_bh)
     
     #%%% TEMP STUFF
     plt.style.use("seaborn-bright")
@@ -706,7 +733,8 @@ if __name__ == '__main__':
         
     #%%
     
-    sim_ret_rbm=np.asarray(from_pickle("RBM_simpf.pkl"))
+    sim_ret_rbm=np.asarray(from_pickle("result plots/PF performance/13RBM_simpf.pkl"))
+    rbm_mdd=max_drawdown(sim_ret_rbm)
     pnl_rbm=strategy_ret(sim_ret_rbm, simtype="RBM_test")    
         
     #%%

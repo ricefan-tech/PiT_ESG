@@ -7,9 +7,7 @@ from statsmodels.graphics.gofplots import qqplot_2samples
 import io
 import statsmodels.api as sm
 import seaborn as sns
-import sys
 
-sys.stdout.flush()
 class Metrics_monitor:
     def __init__(self, machine, metrics = ['rec_error','sq_error','pseudo_log','DKL','recon_c_e','recon_c_e','sparsity','magn_error','magn_error','log_like_AIS'] , steps = None, n_chains=None):
         self.machine = machine
@@ -87,12 +85,12 @@ class Metrics_monitor:
         bindf=pd.DataFrame(data=bin_data)
         x_real=pd.DataFrame(index=bindf.index, columns=[i for i in range(partition)])
     
-        x_int=np.zeros((bindf.shape[0],partition))
+        x_int=np.zeros((bin_data.shape[0],partition))
         l=[[i*16, (i+1)*16] for i in range(partition)]
         
         for i in range(len(l)):
           
-            temp=bindf.iloc[:, l[i][0]:l[i][1]]
+            temp=bin_data.iloc[:, l[i][0]:l[i][1]]
             
             for m in range(16):
                 x_int[:,i] += (2**m)*temp.iloc[:,15-m]
@@ -104,12 +102,10 @@ class Metrics_monitor:
 
     def QQ(self,res_int,  data, xmas, xmin):
         #transform sample
-        #plt.figure()
         pp_y = sm.ProbPlot(data.T)
         pp_x = sm.ProbPlot(res_int.T)
         fig=qqplot_2samples(pp_x,pp_y, xlabel="Quantiles of Data", ylabel="Quantiles of RBM", line="45")
         fig.suptitle("RBM vs. Data")
-        #plt.show()
         final_plot=self.plot_to_image(fig)
         return final_plot
         
@@ -243,57 +239,34 @@ class Metrics_monitor:
             tf.summary.histogram('histogram', var, step=step)
             
     #test_set is already binary
-    def fit(self,weeks,test_set,raw, xmas, xmin,samplength=1000,n_points = None):
+    def fit(self,test_set,qqraw_data, xmas, xmin,n_points = None):
         if self.steps == None:
             self.steps = self.machine.k
 
         if not n_points == None:
             rnd_test_points_idx = np.random.randint(low=0, high=test_set.shape[0],size=n_points)  # sample size random points indexes from test
             test_set = test_set[rnd_test_points_idx,:]
-        samples, prob, _ = self.machine.parallel_sample(n_chains=test_set.shape[0],n_step_MC=self.steps)
+        #samples, prob, _ = self.machine.parallel_sample(n_chains=test_set.shape[0],n_step_MC=self.steps)
         #samples are binary
-        samp,_, _ = self.machine.parallel_sample([],n_step_MC=self.steps, n_chains=self.n_chains)
-        size=weeks
-        #last week vix value is last 16 units
-        cond= test_set[int(np.floor((4694)/5)),-16:].reshape(1,-1)
-        samps=np.zeros((size,16*5))
-        for j in range(size):
-            rnd = np.random.choice([0, 1], size=(1, test_set.shape[1]-16), p=[0.5,0.5]).astype(np.float64)
-        
-            inpt=np.concatenate([rnd, cond.reshape(1,-1)], axis=1).reshape(1,-1)
-            samples, _,_ = self.machine.parallel_sample_cond(cond, inpt,n_step_MC=self.steps)
-            #only care about the spx samples
-            samps[j,:]=samples[:,:16*5]
-            #the second to last value stands for projected friday vix value
-            cond=test_set[int(np.floor((4694)/5))+1+j,-16:].reshape(1,-1)
-        s = pd.DataFrame(data=samps)
-        sampsint = self.bin_to_int(s, xmas, xmin)
-        #samps_np already reshapes 5day forecasts into one column vector
-        # samps_np = np.asarray(sampsint).reshape(-1, 1)
-        # print("Mean: ", np.mean(raw), np.mean(samps_np), flush=True)
-        # print("Std: ", np.std(raw), np.std(samps_np), flush=True)
-        # print("1st perc: ", np.percentile(raw, 1), np.percentile(samps_np, 1), flush=True)
-        # print("99th perc: ", np.percentile(raw, 99), np.percentile(samps_np, 99), flush=True)
+        #samp,_, _ = self.machine.parallel_sample([],n_step_MC=self.steps, n_chains=self.n_chains)
+        samples, prob, _ = self.machine.parallel_sample([],n_step_MC=self.steps, n_chains=test_set.shape[0])
         with tf.name_scope('Performance Metrics'):
+         
+                
+                
             if 'rec_error' in self.metrics:
                 rec_error = self.reconstruction_cross_entropy(samples,prob)
-                #print(rec_error)
-                #tf.summary.scalar('rec_error', rec_error, step=self.machine.epoch)
+                tf.summary.scalar('rec_error', rec_error, step=self.machine.epoch)
             if 'sq_error' in self.metrics:
-                s=0
-                for i in range(5):
-                    sq_error = self.average_squared_error(test_set[int(np.floor((4694)/5)):int(np.floor((4694)/5))+weeks,i*16:(i+1)*16],samps[:,i*16:(i+1)*16])
-                    s+=sq_error
-                    #print("squared error: ",i, s/5, flush=True)
-                #tf.summary.scalar('squared_error', sq_error, step=self.machine.epoch)
+                sq_error = self.average_squared_error(test_set,samples)
+                tf.summary.scalar('squared_error', sq_error, step=self.machine.epoch)
             if 'pseudo_log' in self.metrics:
                 pseudo_log = self.pseudo_log_likelihood(test_set)
                 tf.summary.scalar('Pseudo log likelihood', pseudo_log, step=self.machine.epoch)
             if 'DKL' in self.metrics:
-                kl=tf.keras.losses.KLDivergence()
-                #print(kl(raw, samps_np), flush=True)
-                #tf.summary.scalar('KL divergence', DKL, step=self.machine.epoch)
-                #tf.summary.scalar('inverse KL divergence', DKL_inv, step=self.machine.epoch)
+                DKL, DKL_inv = self.KL_divergence( test_set, samples, 100)
+                tf.summary.scalar('KL divergence', DKL, step=self.machine.epoch)
+                tf.summary.scalar('inverse KL divergence', DKL_inv, step=self.machine.epoch)
             if 'recon_c_e' in self.metrics:
                 recon_c_e = self.recon_c_e(test_set, prob)
                 tf.summary.scalar('Binary cross entropy', recon_c_e, step=self.machine.epoch)
@@ -312,5 +285,61 @@ class Metrics_monitor:
             self.variable_summaries(self.machine.hidden_biases, step=self.machine.epoch)
         with tf.name_scope('visible_biases'):
             self.variable_summaries(self.machine.visible_biases, step=self.machine.epoch)
+        # with tf.name_scope('Gradients_weights'):
+        #     self.variable_summaries(self.machine.grad_dict['weights'], step=self.machine.epoch)
+        # with tf.name_scope('Gradients_visible_biases'):
+        #     self.variable_summaries(self.machine.grad_dict['visible_biases'], step=self.machine.epoch)
+        # with tf.name_scope('Gradients_hidden_biases'):
+        #     self.variable_summaries(self.machine.grad_dict['hidden_biases'], step=self.machine.epoch)
+        # with tf.name_scope('Weights_norm:'):
+        #     tf.summary.scalar('Weights_norm', np.linalg.norm(self.machine.weights.numpy()), step=self.machine.epoch)
 
+        
 
+        
+        
+        # resdf=pd.DataFrame(data=samples)
+        # res_int=self.bin_to_int(resdf, xmas, xmin)
+        
+        # for i in range(qqraw_data.shape[1]):
+        #     q=self.QQ(res_int.iloc[:,i],  qqraw_data[:,i], xmas, xmin)
+        #     n='QQ_Plot '+str(i)
+        #     tf.summary.image(n, q, step=self.machine.epoch)
+            
+            # q2=self.QQ2(res_int,  qqraw_data, xmas, xmin)
+            # n='QQ_Plot '+qqraw_data.columns[1]
+            # tf.summary.image(n, q2, step=self.machine.epoch)
+            
+            # q3=self.QQ3(res_int,  qqraw_data, xmas, xmin)
+            # n='QQ_Plot '+qqraw_data.columns[2]
+            # tf.summary.image(n, q3, step=self.machine.epoch)
+            
+            # q4=self.QQ4(res_int,  qqraw_data, xmas, xmin)
+            # n='QQ_Plot '+qqraw_data.columns[3]
+            # tf.summary.image(n, q4, step=self.machine.epoch)
+            # #print("epoch %d" % (self.machine.epoch + 1), "Rec error: %s" % np.asarray(recon_c_e),
+            #       #"sq_error %s" % np.asarray(sq_error))
+            
+        # corr_list=['pearson', 'kendall', 'spearman']
+        # for j in corr_list:
+        #     corr_heat=sns.heatmap(res_int.corr(method=j), annot = True, vmin=-1, vmax=1, center= 0)
+        #     n_heat=j+" Correlation"
+        #     h=self.plot_to_image(corr_heat)
+        #     tf.summary.image(n_heat, h, step=self.machine.epoch)
+            
+            # corr_heat2=sns.heatmap(res_int.corr(method="spearman"), annot = True, vmin=-1, vmax=1, center= 0)
+            # n_heat2="Spearman Correlation"
+            # h2=self.plot_to_image(corr_heat2)
+            # tf.summary.image(n_heat2,h2, step=self.machine.epoch)
+            
+            # corr_heat3=sns.heatmap(res_int.corr(method="kendall"), annot = True, vmin=-1, vmax=1, center= 0)
+            # n_heat3="Kendall Correlation"
+            # h3=self.plot_to_image(corr_heat3)
+            # tf.summary.image(n_heat3, h3, step=self.machine.epoch)
+            
+        
+        # i = np.random.randint(low=0, high=test_set.shape[0], size=1)[0]
+        # reconstruction_plot, prob, inpt, _ = self.machine.sample(inpt=test_set[i,:])
+        # pic = tf.concat([tf.reshape(inpt, (1, self.machine._v_dim)), prob, reconstruction_plot], 0)
+        # tf.summary.image('Reconstruction pictures ',tf.reshape(pic, (3, self.machine._picture_shape[0], self.machine._picture_shape[1], 1)), max_outputs=100,
+        #                  step=self.machine.epoch)
